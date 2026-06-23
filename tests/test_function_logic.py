@@ -142,7 +142,7 @@ def test_iniciar_ruta_claims_explicit_route_stop(monkeypatch):
         c for c in fake_orchestrator.calls
         if c["endpoint"] == "change_orchestration_session_status"
     )
-    assert pause_call["orchestration_session_id"] == SESSION_ID
+    assert pause_call["orchestration_session_uuid"] == SESSION_ID
     assert pause_call["status"] == "paused"
     dispatch_calls = [
         c for c in fake_orchestrator.calls
