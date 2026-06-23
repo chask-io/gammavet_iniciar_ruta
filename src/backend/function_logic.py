@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import requests
 from chask_foundation.backend.models import OrchestrationEvent
 
 from .conductor_common import (
@@ -77,8 +78,29 @@ def _start_requested_stop(
         requested_pickup_order_id,
         resolved.source,
     )
-    with tenant_data_public_test_mode():
-        result = context.tenant_client().post(TENANT_START_NEXT_PATH, json=payload)
+    try:
+        with tenant_data_public_test_mode():
+            result = context.tenant_client().post(TENANT_START_NEXT_PATH, json=payload)
+    except requests.HTTPError as exc:
+        if _is_start_next_noop_404(exc):
+            context.emit_dispatch_event(
+                event_type="conductor_start_next_terminal_noop",
+                metadata={
+                    "reason": "requested_stop_not_startable_or_already_complete",
+                    "action": action_name,
+                    "route_stop_id": requested_route_stop_id,
+                    "pickup_order_id": requested_pickup_order_id,
+                    "driver_phone": context.driver_phone(),
+                    "session_uuid": str(context.evento_orquestacion.orchestration_session_uuid),
+                    "event_id": str(context.evento_orquestacion.event_id),
+                    "terminal": True,
+                },
+            )
+            return (
+                "No-op terminal: no hay una parada pendiente para iniciar o la parada "
+                "solicitada ya fue cerrada. No se envio un nuevo WhatsApp al conductor."
+            )
+        raise
 
     claimed, stop = context.parse_start_next_result(result)
     if not claimed and stop is None:
@@ -123,6 +145,24 @@ def _start_requested_stop(
     return (
         f"Ruta {route_id} {started_label}. "
         f"Mensaje con parada {stop_number}/{total} enviado al conductor."
+    )
+
+
+def _is_start_next_noop_404(exc: requests.HTTPError) -> bool:
+    response = getattr(exc, "response", None)
+    if getattr(response, "status_code", None) != 404:
+        return False
+    message = str(exc).lower()
+    try:
+        body = response.json() if response is not None else {}
+        message = f"{message} {body}".lower()
+    except Exception:
+        pass
+    return (
+        "requested route_stop_id not pending or en_ruta for driver" in message
+        or "no pending" in message
+        or "no hay paradas" in message
+        or "no tienes rutas pendientes" in message
     )
 
 

@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import requests
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from backend.conductor_common import TENANT_START_NEXT_PATH  # noqa: E402
@@ -77,7 +79,10 @@ class FakeTenantClient:
 
     def post(self, path, *, json=None):
         self.calls.append({"path": path, "json": json})
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 class FakeOrchestrator:
@@ -150,3 +155,27 @@ def test_iniciar_ruta_missing_route_stop_fails_closed(monkeypatch):
     assert "route_stop_id" in result
     dispatch_call = next(c for c in fake_orchestrator.calls if c.get("event_type") == "dispatch_event")
     assert dispatch_call["extra_params"]["event_type"] == "conductor_route_stop_id_missing_terminal"
+
+
+def test_iniciar_ruta_start_next_404_after_completed_stop_is_terminal_noop(monkeypatch):
+    response = requests.Response()
+    response.status_code = 404
+    response._content = b'{"detail":"Requested route_stop_id not pending or en_ruta for driver"}'
+    tenant_client = FakeTenantClient([requests.HTTPError(response=response)])
+    fake_orchestrator = FakeOrchestrator()
+    monkeypatch.setattr(
+        "backend.conductor_common.ConductorContext.tenant_client",
+        lambda self: tenant_client,
+    )
+    monkeypatch.setattr("backend.conductor_common.orchestrator_api_manager", fake_orchestrator)
+
+    result = FunctionBackend(
+        _event({"route_stop_id": ROUTE_STOP_ID, "pickup_order_id": PICKUP_ORDER_ID})
+    ).process_request()
+
+    assert "No-op terminal" in result
+    assert tenant_client.calls[0]["json"]["route_stop_id"] == ROUTE_STOP_ID
+    dispatch_call = next(c for c in fake_orchestrator.calls if c.get("event_type") == "dispatch_event")
+    assert dispatch_call["extra_params"]["event_type"] == "conductor_start_next_terminal_noop"
+    assert dispatch_call["extra_params"]["metadata"]["route_stop_id"] == ROUTE_STOP_ID
+    assert dispatch_call["extra_params"]["metadata"]["terminal"] is True
