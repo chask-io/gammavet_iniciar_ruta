@@ -138,6 +138,19 @@ def test_iniciar_ruta_claims_explicit_route_stop(monkeypatch):
     assert "Ruta R-1 iniciada" in result
     whatsapp_call = next(c for c in fake_orchestrator.calls if c.get("event_type") == "response_to_whatsapp_message")
     assert whatsapp_call["prompt"].startswith("Retiro de muestras")
+    pause_call = next(
+        c for c in fake_orchestrator.calls
+        if c["endpoint"] == "change_orchestration_session_status"
+    )
+    assert pause_call["orchestration_session_id"] == SESSION_ID
+    assert pause_call["status"] == "paused"
+    dispatch_calls = [
+        c for c in fake_orchestrator.calls
+        if c["endpoint"] == "evolve_event" and c.get("event_type") == "dispatch_event"
+    ]
+    assert dispatch_calls[0]["extra_params"]["event_type"] == (
+        "conductor_session_paused_until_next_driver_message"
+    )
 
 
 def test_iniciar_ruta_missing_route_stop_fails_closed(monkeypatch):

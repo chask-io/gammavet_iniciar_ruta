@@ -139,6 +139,7 @@ def _start_requested_stop(
         )
 
     context.enviar_mensaje_texto(_stop_text(stop, message_prefix))
+    context.pause_session_until_next_driver_message(reason=f"{action_name}_success")
     total = stop.get("total_stops") or stop.get("route_total_stops") or "?"
     route_id = stop.get("route_code") or stop.get("route_id") or "?"
     stop_number = stop.get("stop_number") or stop.get("queue_position") or "?"
